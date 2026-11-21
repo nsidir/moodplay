@@ -3,12 +3,12 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{% block title %}Music Vibe{% endblock %}</title>
+  <title>{% block title %}moodplay{% endblock %}</title>
   <link rel="stylesheet" href="{% static 'recs/style.css' %}">
 </head>
 <body>
   <header class="topbar">
-    <a class="brand" href="{% url 'home' %}"><span class="dot"></span>Music Vibe</a>
+    <a class="brand" href="{% url 'home' %}"><span class="dot"></span>moodplay</a>
     <nav>
       {% if user.is_authenticated %}
         <a href="{% url 'my_ratings' %}">My ratings</a>

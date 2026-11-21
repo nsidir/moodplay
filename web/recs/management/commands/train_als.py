@@ -1,4 +1,5 @@
-"""Retrain implicit ALS on ListenBrainz feedback + every app user's thumbs up/down.
+"""Retrain implicit ALS on all musicdb feedback after syncing the app's thumbs up/down into it
+(musicdb table `feedback`, partition source=app).
 
     uv run python web/manage.py train_als
     uv run python web/manage.py train_als --rank 64 --alpha 40
@@ -23,17 +24,23 @@ class Command(BaseCommand):
         parser.add_argument("--holdout", type=float, default=0.1)
         parser.add_argument("--seed", type=int, default=42)
         parser.add_argument("--driver-memory", default="3g")
+        parser.add_argument("--plays", action="store_true", help="also train on Taste Profile play counts")
 
-    def handle(self, *args, rank, iters, reg, alpha, holdout, seed, driver_memory, **opts):
-        from music_vibe import als
-        from music_vibe.config import ARTIFACTS
+    def handle(self, *args, rank, iters, reg, alpha, holdout, seed, driver_memory, plays=False, **opts):
+        from moodplay import als
+        from moodplay import musicdb as db
 
-        rows = list(Feedback.objects.values("user_id", "recording_mbid", "value"))
-        path = ARTIFACTS / "app_feedback.parquet"
-        pd.DataFrame(rows, columns=["user_id", "recording_mbid", "value"]).to_parquet(path, index=False)
-        self.stdout.write(f"Exported {len(rows)} feedback rows from {len({r['user_id'] for r in rows})} users")
-        meta = als.run(app_feedback=path, rank=rank, max_iter=iters, reg=reg, alpha=alpha,
-                       holdout=holdout, seed=seed, driver_memory=driver_memory)
+        db.open_db()
+        rows = list(Feedback.objects.values("user_id", "recording_mbid", "value", "updated"))
+        df = pd.DataFrame(rows, columns=["user_id", "recording_mbid", "value", "updated"])
+        df = df.assign(created=df.pop("updated").astype(str))
+        if len(df):
+            db.write("feedback", df, "app", "web app (Django recs.Feedback)")
+        elif db.has("feedback", "app"):
+            db.drop("feedback", "app")
+        self.stdout.write(f"Synced {len(df)} feedback rows from {df.user_id.nunique()} users into musicdb")
+        meta = als.run(rank=rank, max_iter=iters, reg=reg, alpha=alpha,
+                       holdout=holdout, seed=seed, driver_memory=driver_memory, plays=plays)
         self.stdout.write(self.style.SUCCESS(
             f"ALS trained: hit-rate@50 {meta['hit_rate_at_50']} (popularity baseline "
             f"{meta['hit_rate_at_50_popularity']}) in {meta['seconds']}s"))

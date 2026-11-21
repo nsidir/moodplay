@@ -1,7 +1,7 @@
 [project]
-name = "music-vibe"
+name = "moodplay"
 version = "0.1.0"
-description = "Add your description here"
+description = "Describe a mood in plain language, get music that fits: tag + embedding search, audio and kNN tag models, implicit ALS personalization."
 authors = [
     { name = "Nikos Sidiropoulos", email = "nicksidiropoulos56@gmail.com" }
 ]
@@ -21,7 +21,7 @@ dependencies = [
 ]
 
 [project.scripts]
-music-vibe = "music_vibe:main"
+moodplay = "moodplay:main"
 
 [build-system]
 requires = ["uv_build>=0.12.23,<0.13.0"]

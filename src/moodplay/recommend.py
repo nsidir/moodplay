@@ -185,9 +185,7 @@ class Recommender:
             return [], info
 
         w = self.w
-        s = w.a * _z(score_a[cand]) + w.b * _z(score_b[cand]) + w.popularity * self._pop[cand]
-        if penalty is not None:
-            s -= w.exclude * np.maximum(_z(penalty[cand]), 0)
+        s = self.relevance(score_a, score_b, penalty, cand)
         pred = None
         if u is not None:
             pred = self.Y @ u
@@ -214,6 +212,19 @@ class Recommender:
                              [str(self.tag_names[j]) for j, _ in why], cover,
                              None if pred is None or not self.Y[i].any() else float(pred[i]), because))
         return out, info
+
+    def relevance(self, score_a: np.ndarray, score_b: np.ndarray, penalty: np.ndarray | None,
+                  cand: np.ndarray) -> np.ndarray:
+        """Non-personal score of the candidate rows (also used by the offline evaluation)."""
+        w = self.w
+        s = w.a * _z(score_a[cand]) + w.b * _z(score_b[cand]) + w.popularity * self._pop[cand]
+        if penalty is not None:
+            s -= w.exclude * np.maximum(_z(penalty[cand]), 0)
+        return s
+
+    def score_query(self, text: str, cand: np.ndarray, mood_mode: str = "lift") -> np.ndarray:
+        tw, qv, ex = self.query_vectors(plan(text, mood_mode))
+        return self.relevance(self.M @ tw, self.V @ qv, self.M @ ex if ex.any() else None, cand)
 
     def _mmr(self, cand: np.ndarray, s: np.ndarray, k: int) -> list[tuple[int, float]]:
         order = np.argsort(-s)[: self.w.pool]

@@ -1,11 +1,15 @@
-"""music-vibe: recommend tracks from a natural-language mood.
+"""moodplay: recommend tracks from a natural-language mood.
 
-  uv run music-vibe extract                  # download + stream ListenBrainz sample -> data/lb
-  uv run music-vibe crawl --tracks 20000     # Last.fm mood tags (needs LASTFM_API_KEY in .env)
-  uv run music-vibe build                    # Spark data step + embedding index
-  uv run music-vibe train-als                # Spark implicit ALS
-  uv run music-vibe ask "chill late night"   # one-shot query
-  uv run music-vibe                          # interactive mode
+  uv run moodplay db build                 # build data/musicdb (the one dataset) from the raw sources
+  uv run moodplay db check|info|pack|unpack FILE
+  uv run moodplay knn                      # kNN tag model on the Last.fm train split + test-split eval
+  uv run moodplay audio                    # audio -> mood-tag model (AcousticBrainz features, Last.fm labels)
+  uv run moodplay crawl --tracks 20000     # optional: Last.fm API mood tags -> musicdb (needs LASTFM_API_KEY)
+  uv run moodplay build                    # Spark data step + embedding index
+  uv run moodplay train-als                # Spark implicit ALS
+  uv run moodplay evaluate                 # mood queries vs held-out Last.fm test-split tags
+  uv run moodplay ask "chill late night"   # one-shot query
+  uv run moodplay                          # interactive mode
 """
 
 from __future__ import annotations
@@ -45,9 +49,21 @@ def _print(recs, info, explain: bool = False) -> None:
 
 
 def main() -> None:
-    p = argparse.ArgumentParser(prog="music-vibe", description="Music recommendations from your mood.")
+    p = argparse.ArgumentParser(prog="moodplay", description="Music recommendations from your mood.")
     sub = p.add_subparsers(dest="cmd")
-    sub.add_parser("extract", help="download the ListenBrainz sample dump and extract parquet")
+    d = sub.add_parser("db", help="musicdb: the single dataset everything reads from")
+    d.add_argument("action", choices=["build", "ingest-lb", "ingest-lastfm", "ingest-api", "ingest-msd",
+                                      "ingest-lb-feedback", "ingest-ab", "check", "info", "pack", "unpack"])
+    d.add_argument("--wait", action="store_true", help="build: wait for AcousticBrainz parts still downloading")
+    d.add_argument("--force", action="store_true", help="build: re-ingest sources already in musicdb")
+    d.add_argument("--keep-raw", action="store_true", help="keep downloaded raw files after ingesting")
+    d.add_argument("file", nargs="?", help="archive for pack/unpack")
+
+    kn = sub.add_parser("knn", help="train the kNN tag model on the Last.fm train split, evaluate on test")
+    kn.add_argument("--min-tag-tracks", type=int, default=15)
+    au = sub.add_parser("audio", help="train the audio -> mood-tag model on AcousticBrainz features, evaluate on test")
+    au.add_argument("--rebuild-features", action="store_true", help="recompute artifacts/audio_features.parquet")
+    sub.add_parser("evaluate", help="end-to-end mood-query evaluation on the Last.fm test split")
 
     c = sub.add_parser("crawl", help="fetch Last.fm mood tags (cached, resumable)")
     c.add_argument("--seed-pages", type=int, default=5, help="pages of 100 per seed tag (0 to skip)")
@@ -74,7 +90,8 @@ def main() -> None:
     t.add_argument("--holdout", type=float, default=0.1)
     t.add_argument("--seed", type=int, default=42)
     t.add_argument("--driver-memory", default="3g")
-    t.add_argument("--feedback", help="parquet with user_id, recording_mbid, value (+1/-1)")
+    t.add_argument("--plays", action="store_true",
+                   help="also train on Taste Profile play counts (off by default: hit-rate@50 0.199 -> 0.091)")
 
     for name in ("ask", "chat"):
         a = sub.add_parser(name, help="one-shot query" if name == "ask" else "interactive mode")
@@ -87,9 +104,47 @@ def main() -> None:
         a.add_argument("--explain", action="store_true")
     args = p.parse_args(sys.argv[1:] or ["chat"])
 
-    if args.cmd == "extract":
-        from . import extract
-        extract.run()
+    if args.cmd == "db":
+        from . import ingest
+        from . import musicdb as db
+        act = args.action
+        if act == "build":
+            ingest.run(force=args.force, wait=args.wait)
+        elif act == "ingest-msd":
+            ingest.ingest_msd(keep_raw=args.keep_raw)
+        elif act == "ingest-lb-feedback":
+            ingest.ingest_lb_feedback_full(keep_raw=args.keep_raw)
+        elif act == "ingest-ab":
+            ingest.ingest_ab_features(keep_raw=args.keep_raw, force=args.force)
+            ingest.ingest_ab_highlevel(keep_raw=args.keep_raw, wait=args.wait, force=args.force)
+        elif act == "ingest-lb":
+            ingest.ingest_listenbrainz()
+        elif act == "ingest-lastfm":
+            ingest.ingest_lastfm()
+        elif act == "ingest-api":
+            ingest.ingest_lastfm_api()
+        elif act == "check":
+            sys.exit(1 if db.check() else 0)
+        elif act == "info":
+            db.info()
+        elif act == "pack":
+            db.pack(args.file)
+        elif act == "unpack":
+            if not args.file:
+                sys.exit("usage: moodplay db unpack musicdb-v1.tar")
+            db.unpack(args.file)
+        return
+    if args.cmd == "audio":
+        from . import audio_tags
+        audio_tags.run(rebuild_features=args.rebuild_features)
+        return
+    if args.cmd == "knn":
+        from . import knn_tags
+        knn_tags.run(min_tag_tracks=args.min_tag_tracks)
+        return
+    if args.cmd == "evaluate":
+        from . import evaluate
+        evaluate.run()
         return
     if args.cmd == "crawl":
         from .lastfm import LastFM
@@ -101,11 +156,13 @@ def main() -> None:
             from .config import ARTIFACTS
             path = ARTIFACTS / "tracks.parquet"
             if not path.exists():
-                sys.exit("Run `music-vibe build` once first so the crawler knows the catalogue.")
+                sys.exit("Run `moodplay build` once first so the crawler knows the catalogue.")
             tr = pd.read_parquet(path, columns=["recording_mbid", "artist", "title", "users"])
             tr = tr.sort_values("users", ascending=False)
             lf.track_pass(list(tr[["recording_mbid", "artist", "title"]].itertuples(index=False, name=None)),
                           limit=args.tracks)
+        from . import ingest
+        ingest.ingest_lastfm_api()  # the crawl cache -> musicdb tags/lastfm_api + lastfm_seed
         return
     if args.cmd in ("build", "build-data", "build-index"):
         from . import build_data, build_index
@@ -117,13 +174,14 @@ def main() -> None:
         return
     if args.cmd == "train-als":
         from . import als
-        als.run(app_feedback=args.feedback, rank=args.rank, max_iter=args.iters, reg=args.reg,
-                alpha=args.alpha, holdout=args.holdout, seed=args.seed, driver_memory=args.driver_memory)
+        als.run(rank=args.rank, max_iter=args.iters, reg=args.reg,
+                alpha=args.alpha, holdout=args.holdout, seed=args.seed, driver_memory=args.driver_memory,
+                plays=args.plays)
         return
 
     from .config import ARTIFACTS
     if not (ARTIFACTS / "index.npz").exists():
-        sys.exit("No index found. Run:  uv run music-vibe extract && uv run music-vibe build")
+        sys.exit("No index found. Run:  uv run moodplay extract && uv run moodplay build")
     from .recommend import Recommender
 
     rec = Recommender()

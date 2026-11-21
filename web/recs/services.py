@@ -18,8 +18,8 @@ _als_mtime = None
 
 def get_recommender():
     global _rec, _als_mtime
-    from music_vibe.als import ALS_FILE
-    from music_vibe.recommend import Recommender
+    from moodplay.als import ALS_FILE
+    from moodplay.recommend import Recommender
 
     with _lock:
         if _rec is None:

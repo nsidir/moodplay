@@ -47,7 +47,7 @@ def _find_java_home() -> str | None:
     return cur
 
 
-def get_spark(app: str = "music-vibe", driver_memory: str = "3g"):
+def get_spark(app: str = "moodplay", driver_memory: str = "3g"):
     java_home = _find_java_home()
     if java_home:
         os.environ["JAVA_HOME"] = java_home
