@@ -1,0 +1,110 @@
+{% extends "recs/base.html" %}
+{% block title %}{% if q %}{{ q }} · {% endif %}Music Vibe{% endblock %}
+{% block content %}
+<section class="hero{% if q %} compact{% endif %}">
+  {% if not q %}<h1>What do you want to hear?</h1>
+  <p class="sub">Describe a mood, a moment or an activity in your own words. Rate tracks 👍 / 👎 and the picks adapt to your taste.</p>{% endif %}
+
+  <form method="get" action="{% url 'home' %}" class="search">
+    <div class="searchrow">
+      <input type="text" name="q" value="{{ q }}" maxlength="300" autofocus
+             placeholder="e.g. chill late night, nothing too sad">
+      <button class="btn" type="submit">Find music</button>
+    </div>
+    <details class="filters" {% if year_from or year_to or mood == 'match' or popular != '20' %}open{% endif %}>
+      <summary>Filters</summary>
+      <div class="filtergrid">
+        <label>From year <input type="number" name="year_from" value="{{ year_from }}" min="1900" max="2030" placeholder="1950"></label>
+        <label>To year <input type="number" name="year_to" value="{{ year_to }}" min="1900" max="2030" placeholder="2025"></label>
+        <label>Popularity
+          <select name="popular">
+            <option value="200" {% if popular == '200' %}selected{% endif %}>Well known</option>
+            <option value="20" {% if popular == '20' %}selected{% endif %}>Balanced</option>
+            <option value="5" {% if popular == '5' %}selected{% endif %}>Deep cuts</option>
+          </select></label>
+        <label>If I describe a feeling
+          <select name="mood">
+            <option value="lift" {% if mood != 'match' %}selected{% endif %}>Lift my mood</option>
+            <option value="match" {% if mood == 'match' %}selected{% endif %}>Match my mood</option>
+          </select></label>
+      </div>
+    </details>
+  </form>
+
+  {% if not q %}
+  <div class="chips examples">
+    {% for e in examples %}<a class="chip" href="?q={{ e|urlencode }}">{{ e }}</a>{% endfor %}
+  </div>
+  {% endif %}
+  {% if recent %}
+  <div class="recent">
+    <span class="muted">Recent:</span>
+    {% for r in recent %}<a class="chip ghost" href="?q={{ r|urlencode }}">{{ r }}</a>{% endfor %}
+    <form method="post" action="{% url 'clear_history' %}" class="inline">{% csrf_token %}
+      <button class="linklike muted" type="submit">clear</button></form>
+  </div>
+  {% endif %}
+</section>
+
+{% if q %}
+<section class="understood">
+  <div>
+    {% if info.feeling %}<span class="pill">feeling: {{ info.feeling }} → {{ info.mood_mode }}</span>{% endif %}
+    {% for t, w in info.query_tags %}<span class="pill tag">{{ t }}</span>{% endfor %}
+    {% for e in info.excludes %}<span class="pill no">no {{ e }}</span>{% endfor %}
+  </div>
+  <div class="persona">
+    {% if not user.is_authenticated %}
+      <a href="{% url 'login' %}?next={{ request.get_full_path|urlencode }}">Log in</a> to rate tracks and get personalized picks.
+    {% elif info.personalized %}
+      <span class="ok">●</span> Personalized from your {{ info.n_feedback }} rating{{ info.n_feedback|pluralize }}
+    {% elif not als %}
+      ALS model not trained yet. Results use vibe only.
+    {% else %}
+      Rate a few tracks 👍 / 👎 to personalize.
+    {% endif %}
+  </div>
+</section>
+
+{% if tracks %}
+<section class="grid">
+  {% for t in tracks %}
+  <article class="card track" data-track="{{ t.mbid }}">
+    <div class="cover">
+      {% if t.cover %}<img src="{{ t.cover }}" alt="" loading="lazy" referrerpolicy="no-referrer"
+           onerror="this.remove()">{% endif %}
+      <span class="note">♪</span>
+    </div>
+    <div class="body">
+      <h3 title="{{ t.title }}">{{ t.title }}</h3>
+      <div class="artist" title="{{ t.artist }}">{{ t.artist }}</div>
+      <div class="meta">
+        {% if t.release %}<span class="muted" title="{{ t.release }}">{{ t.release|truncatechars:28 }}</span>{% endif %}
+        {% if t.year %}<span class="year">{{ t.year }}</span>{% endif %}
+        {% if t.personal is not None %}
+          <span class="foryou {% if t.personal >= 0.2 %}pos{% elif t.personal < 0 %}neg{% endif %}"
+                title="ALS preference for you (higher = more your taste)">{{ t.personal|floatformat:2 }} for you</span>
+        {% endif %}
+      </div>
+      <div class="chips">{% for w in t.why %}<span class="chip small">{{ w }}</span>{% endfor %}</div>
+      {% if t.because %}<div class="because">Because you liked <b>{{ t.because }}</b></div>{% endif %}
+      <div class="cardfoot">
+        <div class="links">
+          {% for name, url in t.links.items %}<a href="{{ url }}" target="_blank" rel="noopener">{{ name }}</a>{% endfor %}
+        </div>
+        <div class="vote" data-query="{{ q }}">
+          <button class="thumb up" data-value="1" aria-label="Good pick" title="Good pick">👍</button>
+          <button class="thumb down" data-value="-1" aria-label="Bad pick" title="Bad pick">👎</button>
+        </div>
+      </div>
+    </div>
+  </article>
+  {% endfor %}
+</section>
+<p class="muted center">Rated tracks are hidden from future results. Search again to see the effect of your ratings.</p>
+{% else %}
+<p class="empty">No matches. Try loosening the filters.</p>
+{% endif %}
+{% endif %}
+<script>window.MV_LOGGED_IN = {{ user.is_authenticated|yesno:"true,false" }}; window.MV_LOGIN = "{% url 'login' %}";</script>
+{% endblock %}

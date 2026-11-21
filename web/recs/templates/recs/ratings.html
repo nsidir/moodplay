@@ -1,0 +1,38 @@
+{% extends "recs/base.html" %}
+{% block title %}My ratings · Music Vibe{% endblock %}
+{% block content %}
+<h1 class="pagetitle">My ratings</h1>
+<p class="sub">{{ ups }} good · {{ downs }} bad. Your ratings shape your personal ALS vector right away. They also
+  feed the shared model the next time it's retrained, so they help everyone.</p>
+
+{% if rows %}
+<table class="ratings">
+  <thead><tr><th>Track</th><th>Artist</th><th>Rated for vibe</th><th></th></tr></thead>
+  <tbody>
+  {% for r in rows %}
+    <tr data-track="{{ r.fb.recording_mbid }}">
+      <td><b>{{ r.title }}</b> <span class="muted">{{ r.year|default:"" }}</span></td>
+      <td class="muted">{{ r.artist }}</td>
+      <td class="muted">{{ r.fb.query|default:"-" }}</td>
+      <td class="vote" data-query="{{ r.fb.query }}">
+        <button class="thumb up {% if r.fb.value == 1 %}active{% endif %}" data-value="1" aria-label="Good">👍</button>
+        <button class="thumb down {% if r.fb.value == -1 %}active{% endif %}" data-value="-1" aria-label="Bad">👎</button>
+      </td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="empty">No ratings yet. <a href="{% url 'home' %}">Search for a vibe</a> and rate some tracks.</p>
+{% endif %}
+
+{% if als %}
+<details class="modelinfo">
+  <summary>Model info</summary>
+  <p>Implicit ALS, rank {{ als.rank }}, trained {{ als.trained_at }} on {{ als.interactions }} likes/dislikes from
+    {{ als.users }} users (including {{ als.app_feedback_rows }} from this app). Held-out hit-rate@50:
+    {{ als.hit_rate_at_50 }} vs {{ als.hit_rate_at_50_popularity }} for the most-liked tracks.</p>
+</details>
+{% endif %}
+<script>window.MV_LOGGED_IN = true;</script>
+{% endblock %}

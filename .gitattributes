@@ -1,0 +1,8 @@
+# Keep LF in the repo and in working copies so the same checkout works on Windows and Linux.
+* text=auto eol=lf
+Makefile text eol=lf
+*.sh text eol=lf
+*.parquet binary
+*.npz binary
+*.npy binary
+*.sqlite3 binary
